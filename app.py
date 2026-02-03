@@ -76,13 +76,15 @@ class SessionScreen(Screen):
 
         self.query_one("#lesson-title", Static).update(f"Lesson: {article.title}")
         self._update_lesson_text("")
-        self.started_at = dt.datetime.utcnow()
+        self.started_at = None
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
-        if not self.started_at:
-            return
-
         typed_text = self.query_one("#typing-area", TextArea).text
+        if not typed_text:
+            self._update_lesson_text("")
+            return
+        if not self.started_at:
+            self.started_at = dt.datetime.utcnow()
         elapsed_s = (dt.datetime.utcnow() - self.started_at).total_seconds()
         metrics = compute_metrics(self.target_text, typed_text, elapsed_s)
 
