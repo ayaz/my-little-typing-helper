@@ -8,6 +8,8 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static, TextArea
 from rich.markup import escape
+from rich.console import Group
+from rich.table import Table
 
 from metrics import compute_metrics
 from stats import SessionRecord, StatsStore
@@ -189,12 +191,11 @@ class StatsScreen(Screen):
 
         sessions_sorted = sorted(sessions, key=_session_key, reverse=True)
 
-        lines = [
-            f"Total Sessions: {total}",
-            f"Average WPM: {avg_wpm:.1f}",
-            f"Average Accuracy: {avg_acc * 100.0:.1f}%",
-            "",
-        ]
+        summary = (
+            f"Total Sessions: {total}\n"
+            f"Average WPM: {avg_wpm:.1f}\n"
+            f"Average Accuracy: {avg_acc * 100.0:.1f}%\n"
+        )
 
         def _humanize_timestamp(iso_ts: str) -> str:
             if not iso_ts:
@@ -226,17 +227,26 @@ class StatsScreen(Screen):
             years = int(seconds // (86400 * 365))
             return f"{years} year{'s' if years != 1 else ''} ago"
 
+        table = Table(show_header=True, box=None, show_edge=False, pad_edge=False)
+        table.add_column("When", width=18, no_wrap=True)
+        table.add_column("WPM", justify="right", width=6, no_wrap=True)
+        table.add_column("Accuracy", justify="right", width=10, no_wrap=True)
+        table.add_column("Error", justify="right", width=8, no_wrap=True)
+
         for session in sessions_sorted:
             wpm = session.get("wpm", 0.0)
             accuracy = session.get("accuracy", 0.0)
             error = max(0.0, 1.0 - accuracy)
             timestamp = session.get("ended_at") or session.get("started_at") or ""
             human_time = _humanize_timestamp(timestamp)
-            lines.append(
-                f"{human_time} | WPM: {wpm:.1f} | Accuracy: {accuracy * 100.0:.1f}% | Error: {error * 100.0:.1f}%"
+            table.add_row(
+                human_time,
+                f"{wpm:.1f}",
+                f"{accuracy * 100.0:.1f}%",
+                f"{error * 100.0:.1f}%",
             )
 
-        self.query_one("#stats-body", Static).update("\n".join(lines))
+        self.query_one("#stats-body", Static).update(Group(summary, table))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "back":
