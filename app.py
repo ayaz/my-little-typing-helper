@@ -183,12 +183,60 @@ class StatsScreen(Screen):
         avg_acc = (
             sum(s.get("accuracy", 0.0) for s in sessions) / total if total else 0.0
         )
-        body = (
-            f"Total Sessions: {total}\n"
-            f"Average WPM: {avg_wpm:.1f}\n"
-            f"Average Accuracy: {avg_acc * 100.0:.1f}%\n"
-        )
-        self.query_one("#stats-body", Static).update(body)
+
+        def _session_key(session: dict) -> str:
+            return session.get("ended_at") or session.get("started_at") or ""
+
+        sessions_sorted = sorted(sessions, key=_session_key, reverse=True)
+
+        lines = [
+            f"Total Sessions: {total}",
+            f"Average WPM: {avg_wpm:.1f}",
+            f"Average Accuracy: {avg_acc * 100.0:.1f}%",
+            "",
+        ]
+
+        def _humanize_timestamp(iso_ts: str) -> str:
+            if not iso_ts:
+                return "Unknown time"
+            try:
+                parsed = dt.datetime.fromisoformat(iso_ts)
+            except ValueError:
+                return iso_ts
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=dt.timezone.utc)
+            now = dt.datetime.now(dt.timezone.utc)
+            delta = now - parsed
+            seconds = max(delta.total_seconds(), 0.0)
+
+            if seconds < 60:
+                return "just now"
+            if seconds < 3600:
+                minutes = int(seconds // 60)
+                return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+            if seconds < 86400:
+                hours = int(seconds // 3600)
+                return f"{hours} hour{'s' if hours != 1 else ''} ago"
+            if seconds < 86400 * 30:
+                days = int(seconds // 86400)
+                return f"{days} day{'s' if days != 1 else ''} ago"
+            if seconds < 86400 * 365:
+                months = int(seconds // (86400 * 30))
+                return f"{months} month{'s' if months != 1 else ''} ago"
+            years = int(seconds // (86400 * 365))
+            return f"{years} year{'s' if years != 1 else ''} ago"
+
+        for session in sessions_sorted:
+            wpm = session.get("wpm", 0.0)
+            accuracy = session.get("accuracy", 0.0)
+            error = max(0.0, 1.0 - accuracy)
+            timestamp = session.get("ended_at") or session.get("started_at") or ""
+            human_time = _humanize_timestamp(timestamp)
+            lines.append(
+                f"{human_time} | WPM: {wpm:.1f} | Accuracy: {accuracy * 100.0:.1f}% | Error: {error * 100.0:.1f}%"
+            )
+
+        self.query_one("#stats-body", Static).update("\n".join(lines))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "back":
