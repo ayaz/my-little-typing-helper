@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+import time
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
@@ -14,6 +15,7 @@ from rich.table import Table
 from metrics import compute_metrics
 from stats import SessionRecord, StatsStore
 from wikipedia import fetch_random_article
+from article_pool import ArticlePool
 
 
 class HomeScreen(Screen):
@@ -66,14 +68,20 @@ class SessionScreen(Screen):
         self._load_lesson()
 
     def _load_lesson(self) -> None:
-        article = fetch_random_article()
+        """Load lesson from pre-fetched pool or fetch on demand."""
+        article = self.app.article_pool.get_article()
+
+        if article is None:
+            # Pool empty (rare), fetch synchronously as fallback
+            self.query_one("#lesson-title", Static).update("Fetching article...")
+            article = fetch_random_article()
+
         self.article_meta = {
             "title": article.title,
             "url": article.url,
             "extract_len": article.extract_len,
         }
         self.target_text = article.text
-
         self.query_one("#lesson-title", Static).update(f"Lesson: {article.title}")
         self._update_lesson_text("")
         self.started_at = None
@@ -306,8 +314,46 @@ class TypingTutorApp(App):
 
     TITLE = "Typing Tutor"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.article_pool = ArticlePool(target_size=3, min_size=1)
+        self._worker_cancelled = False
+
     def on_mount(self) -> None:
         self.push_screen(HomeScreen())
+        # Start background article fetching
+        self.run_worker(
+            self._article_prefetch_loop,
+            name="article_prefetcher",
+            thread=True,
+            exclusive=True
+        )
+
+    def _article_prefetch_loop(self) -> None:
+        """Background loop that maintains article pool (runs in thread)."""
+        backoff_seconds = 1
+
+        while not self._worker_cancelled:
+            try:
+                if not self.article_pool.is_full():
+                    article = fetch_random_article()
+                    # Skip duplicate articles - fetch_random_article already has retry logic
+                    if not self.article_pool.is_duplicate(article):
+                        self.article_pool.add_article(article)
+                        backoff_seconds = 1
+                    # If duplicate, loop will fetch again on next iteration
+                else:
+                    time.sleep(2)  # Pool full, check again later
+            except Exception:
+                self.article_pool.record_fetch_failure()
+                time.sleep(min(backoff_seconds, 30))
+                backoff_seconds *= 2
+            else:
+                time.sleep(0.5)  # Avoid tight loop
+
+    def on_unmount(self) -> None:
+        """Clean shutdown of background workers."""
+        self._worker_cancelled = True
 
 
 if __name__ == "__main__":
